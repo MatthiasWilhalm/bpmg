@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>BPMG</title>
+
+    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script src="jquery-3.4.1.min.js"></script>
+</head>
+<body>
+    <div class="content">
+        <div class="innercontent">
+                <label>Muisc</label><input type="file" id="of_audio">
+        </div>
+
+        <div class="innercontent" style="padding-left: 50px;">
+            <h1 class="deftitle" id="v_section">Editing section: 0</h1>
+            <div class="danceblock" id="dance">
+                    <input type="number" id="v_bpm_a" step=".01">
+            </div>
+            <div class="adj">
+                <button class="defbutton adj_add" id="addBpm">+</button>
+                <button class="defbutton adj_sub" id="subBpm">-</button>
+            </div>
+            <div class="deftitle">BPM: </div>
+            <table calss="beattable">
+                <tr>
+                    <td><div class="deftitle">MPB:</div></td>
+                    <td><input type="number" id="v_mpb_a" step=".0001"></td>
+                </tr>
+                <tr>
+                    <td><div class="deftitle">Offset: </div></td>
+                    <td><input type="number" id="v_offset" step="1" min="0">
+                    </td>
+                    <td>
+                        <div class="adj_small">
+                            <button class="defbutton adj_add_small" id="addOff">+</button>
+                            <button class="defbutton adj_sub_small" id="subOff">-</button>
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                        <td><div class="deftitle">Last BPM: </div></td>
+                        <td><input type="number" id="v_bpm" step=".0001" readonly></td>
+                </tr>
+                <tr>
+                    <td><div class="deftitle">Last MPB: </div></td>
+                    <td><input type="number" id="v_mpb" step=".0001" readonly></td>
+                </tr>
+                <tr>
+                    <td><div class="deftitle">Meter: </div></td>
+                    <td><input type="number" id="v_meter"></td>
+                    <td>
+                        <div class="adj_small">
+                            <button class="defbutton adj_add_small" id="addMet">+</button>
+                            <button class="defbutton adj_sub_small" id="subMet">-</button>
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                            <label class="switch"><input type="checkbox" id="iskiai"><span class="slider">Kiai</span></label>
+                            <label class="switch"><input type="checkbox" id="isrelative"><span class="slider">%</span></label>
+                    </td>
+                </tr>
+            </table>
+            
+        </div>
+        <div class="innercontent">
+            <label class="switch"><input type="checkbox" id="usemeter"><span class="slider" id="usemeter_"></span></label>
+            <button id="lastoffset" class="single defbutton"><i class="fa fa-step-backward"></i></button>
+            <button id="startrec" class="defbutton"><i class="fa fa-play-circle"></i></button>
+            <button id="stop" class="defbutton"><i class="fa fa-stop"></i></button>
+            <button id="test" class="defbutton"><i class="fa fa-play"></i></button>
+            <button id="addsection" class="defbutton">add section</button>
+            <button id="convert" class="defbutton">Export</button>
+        </div>
+        <div class="innercontent">
+            <div style="background-color: black; width: 100%; height: 20px;" id="offsetmarker">
+            </div>
+            <input type="range" id="timeline" style="width: 100%;" value="0" min="0" max="100" step="1">
+            <input id="playtime" value="0" type="number" step="1"><label id="tracklength"></label>
+        </div>
+
+        <audio id="audio" style="width: 100%;" preload>
+            <source src="audio.mp3">
+        </audio>
+        <audio id="m_1">
+            <source src="metro_1.wav">
+        </audio>
+        <audio id="m_d">
+            <source src="metro_other.wav">
+        </audio>
+        <pre id="output"></pre>
+    </div>
+</body>
+
+<script>
+
+    $(document).ready(()=> {
+
+var time; //absolute time atm on click
+var mpbavg = new Array(); //array of mpb from the current recording
+var bpmavg = new Array(); //array of bpm from the current recording
+var ma = 0.0; //avg from mpbavg (mpbavg[0..n]/mpbavg.length)
+var ba = 0.0; //avg from bpmavg (bpmavg[0..n]/bpmavg.length)
+var timestamp; //startpoint for the absolute offset
+var globaltimestamp; //absulute start time
+var offset = 0.0; //offset from this section ((time - globaltimestamp)%ma)+timestamp
+var meter = parseInt($("#v_meter").val()); //the meter of the song (2/4, 4/4 ...)
+var section = 0; //current work section
+var master = new Array(); //where everithing gets stored
+var tracklength = 0; //length of the music track
+var shift = false; //if shift key is pressed
+var playing = false; //if playback is running
+
+var beatPlayer;
+
+document.getElementById("timeline").value = "0";
+document.getElementById("playtime").value = "0"; 
+
+setToNull();
+
+//updating the audio when a new file has been uploaded
+document.getElementById("of_audio").onchange = async function(e){
+    var sound = document.getElementById('audio');
+    sound.src = URL.createObjectURL(this.files[0]);
+    await sleep(1000);
+    tracklength = sound.duration*1000;
+    $("#tracklength").text("/"+tracklength+" ms");
+    $("#timeline").prop("max", tracklength);
+    document.getElementById("timeline").value = "0";
+    document.getElementById("playtime").value = "0"; 
+    setToNull();
+    addSection();
+}
+
+//checking shift-key
+$(document).keydown(event => {
+    shift = event.shiftKey;
+});
+
+$(document).keyup(event => {
+    shift = event.shiftKey;
+});
+
+//keypress for taping
+$(document).keypress(event => {
+    var keycode = (event.keyCode ? event.keyCode : event.which);
+    if (keycode == '116'){
+        hitTheBeat();
+    }
+});
+
+//clickevent for the + / - buttons
+$("#addBpm").click(event => {addBpm(1)});
+$("#subBpm").click(event => {addBpm(-1)});
+$("#addOff").click(event => {addOffset(10)});
+$("#subOff").click(event => {addOffset(-10)});
+$("#addMet").click(event => {addMeter(1)});
+$("#subMet").click(event => {addMeter(-1)});
+
+//resets the bpm/mpb arrays and starts the music
+$("#startrec").click(event => {
+    mpbavg = new Array();
+    bpmavg = new Array();
+    ma = 0.0;
+    ba = 0.0;
+    time = null;
+    $("#v_bpm_a").prop("readonly", true);
+    $("#v_mpb_a").prop("readonly", true);
+    timestamp = document.getElementById("audio").currentTime*1000;
+    globaltimestamp = new Date().getTime();
+    document.getElementById("audio").play();
+    meter = parseInt($("#meter").val());
+});
+
+//stops the muisc and deletes the bpm/mpb arrays
+$("#stop").click(event => {
+    $("#v_bpm_a").prop("readonly", false);
+    $("#v_mpb_a").prop("readonly", false);
+    document.getElementById("audio").pause();
+    $("#dance").css("animation-name", "none");
+    time = null;
+    mpbavg = new Array();
+    bpmavg = new Array();
+    playing = false;
+    $("#test").prop("disabled", false);
+    saveSection();
+});
+
+//final output
+$("#convert").click(event => {
+    var out = "[TimingPoints]\n";
+    master.forEach(e => {
+        out += e.offset+","+e.mpb+","+"4,"+"0,"+"0,"+"0,"+"0,"+"0\n";
+    });
+    $("#output").text(out);
+});
+
+$("#lastoffset").click(event => {
+    document.getElementById("audio").currentTime = master[section].offset/1000;
+});
+
+
+//starts the playback engine
+$("#test").click(function(event) {
+    playBack();
+});
+
+$("#addsection").click(event => {
+    addSection();
+    time = null;
+});
+
+$("#savesection").click(event => {
+    saveSection();
+});
+
+$("#iskiai").click(event => {
+    saveSection();
+});
+
+//onchange listener
+document.getElementById("audio").ontimeupdate = function(e) {
+    updateTimeline(document.getElementById("audio").currentTime*1000);
+}
+
+document.getElementById("playtime").onchange = function(e) {
+    document.getElementById("audio").currentTime = $("#playtime").val()/1000;
+    $("#timeline").val($("#playtime").val());
+}
+
+$("#timeline").on("input change", () => {
+    document.getElementById("audio").currentTime = $("#timeline").val()/1000;
+    $("#playtime").val($("#timeline").val());
+});
+
+document.getElementById("v_bpm_a").onchange = function(e) {
+    updateBpm();
+}
+
+document.getElementById("v_mpb_a").onchange = function(e) {
+    updateMpb();
+}
+
+document.getElementById("v_offset").onchange = function(e) {
+    updateOffset();
+}
+
+document.getElementById("v_meter").onchange = function(e) {
+    updateMeter();
+}
+
+document.getElementById("isrelative").onchange = function(e) {
+    if(section==0) $("#isrelative").prop("checked", false);
+    else {
+        ma = master[section-1].mpb;
+        refreshView();
+        updateMpb();
+    }
+}
+
+/*
+/////////                \\\\\\\\\
+||||||||| Tool functions ||||||||||
+\\\\\\\\\                /////////
+*/
+
+//easies way to get the beat
+function hitTheBeat() {
+    if(time==null) time = new Date().getTime();
+        else {
+            let mpb = new Date().getTime() - time;
+            time = new Date().getTime();
+            let bpm = 1000*60 / mpb;
+            mpbavg.push(mpb);
+            bpmavg.push(bpm);
+            mpbavg.forEach(e => { 
+                ma += parseFloat(e);
+            });
+            ma /= mpbavg.length;
+            bpmavg.forEach(e => {
+                ba += parseFloat(e);
+            });
+            ba /= bpmavg.length;
+            ba = Math.round(ba*100)/100;
+            ma = bpmToMpb(ba);
+            offset = Math.round(((time - globaltimestamp)%ma)+timestamp);
+            $("#v_bpm").val(bpm);
+            $("#v_mpb").val(mpb);
+            $("#v_bpm_a").val(ba);
+            $("#v_mpb_a").val(ma);
+            $("#v_offset").val(offset);
+        }
+}
+
+//playback engine... plays back the song with all the beatsections from where you have started
+async function playBack() {
+    playing = true;
+    document.getElementById("audio").play();
+    $("#test").prop("disabled", true);
+    if(section==0 && master[0].offset-document.getElementById("audio").currentTime*1000>0)
+        await sleep(master[0].offset-document.getElementById("audio").currentTime*1000);
+    $("#dance").css("animation-iteration-count","infinite");
+    $("#dance").css("animation-timing-function","linear");
+    $("#dance").css("will-change","transform");
+    $("#dance").css("animation-duration", master[0].mpb+"ms");
+    console.log("starting: "+master[0].mpb);
+    var beatcount = 1;
+    var sectionbeatcount; //(pt - offset) / mpb
+    var currsec = 0;
+    //beat engine
+    while(playing) {
+        let pt = document.getElementById("audio").currentTime*1000;
+        let breaktime = ma;
+        //checks in with section we are
+        for (let i = 0; i < master.length; i++) {
+            if(i+1<master.length) {
+                if(pt>master[i+1].offset) {
+                    currsec = i+1;
+                    loadSection(currsec);
+                    $("#dance").css("animation-duration", ma+"ms");
+                } else if(pt<master[1].offset){
+                    currsec = 0;
+                    loadSection(currsec);
+                    $("#dance").css("animation-duration", ma+"ms");
+                }
+            }
+        }
+
+        //TODO: try mit (section.legth / section.mbp) eventuell mit interval
+
+        //sets the shortest breaktime
+        if(currsec+1<master.length && master[currsec+1].offset-pt<breaktime) breaktime = master[currsec+1].offset-pt;
+        //waits if the bpm has changed and the next beat isn't ready yet
+        sectionbeatcount = (Math.round(pt) - offset) / ma;
+        console.log(Math.round(pt)-offset);
+        //console.log("raw_beat: "+(Math.round(pt) - offset) / ma);
+        //console.log("raw%beat: "+(Math.round(pt) - offset) % ma);
+        if((sectionbeatcount+"").split(".").length>1) {
+            //await sleep(parseFloat("0."+(sectionbeatcount+"").split(".")[1])*ma);
+            sectionbeatcount = parseFloat((sectionbeatcount+"").split(".")[0]);
+        }
+
+        let met = $("#usemeter").prop("checked");
+
+        beatcount = sectionbeatcount%meter;
+        console.log("s_beat: "+sectionbeatcount);
+        //console.log("beat: "+beatcount);
+
+        if(beatcount==0) {
+            if(met) {
+                document.getElementById("m_1").currentTime = 0;
+                document.getElementById("m_1").play();
+            }
+            $("#v_bpm_a").css("color", "rgb(9, 78, 0)");
+        } else {
+            if(met) {
+                document.getElementById("m_d").currentTime = 0;
+                document.getElementById("m_d").play();
+            }
+            $("#v_bpm_a").css("color", "black");
+        }
+        /*
+        if (beatcount>=meter){
+            beatcount = 1;
+        } else beatcount++;
+        */
+        $("#dance").css("animation-name", "pulse_animation");
+        await sleep(breaktime); //need: perfect sleep function
+        $("#dance").css("animation-name", "none");
+    }
+    console.log("done");
+    $("#v_bpm_a").css("color", "black");
+    $("#dance").css("animation-name", "none");
+    $("#test").prop("disabled", false);
+}
+
+//returns the current beat in a section an how long there is to wait to be in sync
+async function playerStartpoint() {
+    let beats = 0;
+    if(master[section].mpb<0) {
+        let origensec;
+        for (let i = section; i >= 0; i--) {
+            if(master[i].mpb>=0){
+                origensec = i;
+                break;
+            }
+        }
+        for(let i = origensec; i < section; i++) {
+            beats += Math.floor(getSectionLength(i)/master[i].mpb);
+        }
+    } 
+    let playhead = document.getElementById("audio").currentTime-offset;
+    return {beat: Math.floor(playhead/ma)+beats, wait: playhead%ma}
+}
+
+function getSectionLength(secid) {
+    if(secid>=master.length) return tracklength - master[secid];
+    else return master[secid+1] - master[secid].offset;
+}
+
+function onReadheadUpdate() {
+    let playhead = document.getElementById("audio").currentTime;
+    for (let i = master.length-1; i >=0; i--) {
+        if(master[i].offset<playhead){
+            loadSection(i);
+            break;
+        }
+    }
+    let playdata = playerStartpoint();
+    await sleep(playdata.wait);
+    clearInterval(beatPlayer);
+    beatPlayer = setInterval(playBack, ma);
+    //TODO move on here
+}
+
+//update and refresh functions
+
+
+function updateBpm() {
+    try {
+        ba = parseFloat($("#v_bpm_a").val());
+        ma = bpmToMpb(ba);
+        $("#v_mpb_a").val(ma);
+        master[section].mpb = ma;
+        $("#dance").css("animation-duration", ma+"ms");
+        saveSection();
+    } catch(err){
+        $("#v_bpm_a").val(ba);
+    }
+}
+
+function updateMpb() {
+    try {
+        ma = parseFloat($("#v_mpb_a").val());
+        ba = bpmToMpb(ma);
+        $("#v_bpm_a").val(ba);
+        master[section].mpb = ma;
+        $("#dance").css("animation-duration", ma+"ms");
+        saveSection();
+    } catch(err) {
+        $("#v_mpb_a").val(ma);
+    }
+}
+
+function updateOffset() {
+    try {
+        offset = parseFloat($("#v_offset").val());
+        updateSections();
+        saveSection();
+    }catch(err) {
+        $("#v_offset").val(offset);
+    }
+}
+
+function updateMeter() {
+    try {
+        meter = parseInt($("#v_meter").val());
+        saveSection();
+    } catch(err){
+        $("#v_meter").val(meter);
+    }
+}
+
+function updateTime(t) {
+    document.getElementById("timeline").value = t;
+    document.getElementById("playtime").value = t;
+    document.getElementById("audio").currentTime = t/1000;
+}
+
+function updateTimeline(t) {
+    document.getElementById("timeline").value = t;
+    document.getElementById("playtime").value = t;
+}
+
+function refreshView() {
+    $("#v_bpm_a").val(ba);
+    $("#v_mpb_a").val(ma);
+    $("#v_offset").val(offset);
+    $("#v_meter").val(meter);
+    $("#v_section").text("Editing section "+section);
+    if(master.length>0) $("#iskiai").prop("checked", master[section].kiai);
+}
+
+function refreshVars() {
+    ba = parseFloat($("#v_bpm_a").val());
+    ma = parseFloat($("#v_mpb_a").val());
+    offset = parseInt($("#v_offset").val());
+    meter = parseInt($("#v_meter").val());
+}
+
+function setToNull() {
+    $("#v_bpm_a").val("0.0");
+    $("#v_mpb_a").val("0.0");
+    $("#v_offset").val("0");
+    $("#v_bpm").val("0");
+    $("#v_mpb").val("0");
+    $("#v_meter").val("4");
+    $("#iskiai").prop("checked", false);
+    $("#isrelative").prop("checked", false);
+    refreshVars();
+}
+
+
+//the section section
+
+
+function updateSections(){
+    $(".section").remove();
+    $(".defmarker").remove();
+    $(".currmarker").remove();
+    refreshVars();
+    let sc = 0;
+    master = master.sort((a, b)=>{return a.offset - b.offset});
+    master.forEach(e => {
+        d = document.createElement('div');
+        $(d).attr("id", "sec"+sc);
+        $(d).addClass("innercontent");
+        $(d).addClass("section");
+        $(d).append("<h2>Section: "+sc+"</h2>");
+        $(d).append("<p>mpb: "+master[sc].mpb+" || offset: "+master[sc].offset+" || meter: "+master[sc].meter+" || kiai: "+master[sc].kiai+"</p>");
+        $(d).append($("<button/>", {
+            text: "edit",
+            id: "edit_"+sc,
+            click: function () {
+                loadSection(parseInt($(this).attr("id").split("_")[1]));
+            }
+        }));
+        $(d).append($("<button/>", {
+            text: "delete",
+            id: "delete_"+sc,
+            click: function () {
+                console.log("del:"+$(this).attr("id"));
+                removeSection(parseInt($(this).attr("id").split("_")[1]));
+            }
+        }));
+        $(".content").append(d);
+
+        m = document.createElement('div');
+        $(m).addClass(sc==section?"currmarker":"defmarker");
+        let ml = (sc==section?offset:master[sc].offset) / tracklength*100;
+        $(m).css("left",ml+"%");
+        //$(m).css("margin-left","50%");
+        $("#offsetmarker").append(m);
+
+        if(section==0) $("#isrelative").prop("readonly", true);
+        else $("#isrelative").prop("readonly", false);
+        sc++;
+    });
+}
+
+function loadSection(secid) {
+    if(secid<master.length) {
+        section = secid;
+        if(master[section].mpb<0) {
+            ma = master[section].mpb*master[getNextAbsoluteSection(section)].mpb / (-100);
+            $("#isrelative").prop("checked", true);
+        }else{
+            ma = master[section].mpb;
+            $("#isrelative").prop("checked", false);
+        } 
+        ba = bpmToMpb(ma);
+        offset = master[section].offset;
+        meter = master[section].meter;
+        refreshView();
+
+        //updateTime(master[section].offset);
+        updateSections();
+    }
+}
+
+function saveSection() {
+    refreshVars();
+    if($("#isrelative").prop("checked")) {
+        console.log(ma+"/"+master[getNextAbsoluteSection(section)].mpb+"*(-100)");
+        master[section].mpb = ma/master[getNextAbsoluteSection(section)].mpb * (-100);
+    }else master[section].mpb = ma;
+    master[section].offset = offset;
+    master[section].meter = meter;
+    master[section].kiai = $("#iskiai").prop("checked");
+    updateSections();
+}
+
+function addSection() {
+    refreshVars();
+    let cpt = document.getElementById("audio").currentTime*1000;
+    master.push({mpb: 0, offset: cpt, meter: meter, kiai: $("#iskiai").prop("checked")});
+    updateSections();
+    let i = 0;
+    master.forEach(e => {
+        if(e.offset==cpt) loadSection(i);
+        i++;
+    });
+}
+
+function removeSection(secid) {
+    console.log("removeing section "+secid);
+    master.splice(secid, 1);
+    updateSections();
+}
+
+
+//add functions for + / - buttons
+
+
+function addBpm(num){
+    refreshVars();
+    $("#v_bpm_a").val(ba+(shift?num/2:num));
+    updateBpm();
+}
+
+function addOffset(num) {
+    refreshVars();
+    $("#v_offset").val(offset+(shift?num/2:num));
+    updateOffset();
+}
+
+function addMeter(num) {
+    refreshVars();
+    $("#v_meter").val(meter+num);
+    updateMeter();
+}
+
+
+//random other stuff
+
+
+function getNextAbsoluteSection(secid){
+    for(let i = secid-1; i>=0; i--) {
+        if(master[i].mpb>=0) return i; 
+    }
+    return 0;
+}
+
+function _sleep(ms) {
+    if(ms<2) return;
+    let ref = new Date().getTime();
+    () => {async () => {_sleep(ms)}};
+    if(ms+ref<new Date().getTime()) return sleep(new Date().getTime()-ref);
+    return;
+}
+
+function sleep(ms){
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function bpmToMpb(_bpm) {
+    if(_bpm==0) return 0;
+    else return 1000*60 / _bpm;
+}
+        
+});
+</script>
+</html>
