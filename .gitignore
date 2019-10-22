@@ -1,4 +1,3 @@
-.gitignore
 120beat.mp3
 audio_cam.mp3
 audio.mp3
@@ -11,3 +10,4 @@ metronom.afdesign
 music_data.osu
 bpm_generator.html.bu
 test.osu
+data.osu
