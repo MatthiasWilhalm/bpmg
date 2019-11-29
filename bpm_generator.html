@@ -14,6 +14,7 @@
     <div class="content">
         <div class="innercontent">
                 <label>Muisc</label><input type="file" id="of_audio">
+                <label>osu file</label><input type="file" id="of_osu">
         </div>
 
         <div class="innercontent" style="padding-left: 50px;">
@@ -137,6 +138,29 @@ document.getElementById("of_audio").onchange = async function(e){
     setToNull();
     addSection();
 }
+
+document.getElementById("of_osu").onchange = async function(e){
+    master = new Array();
+    var fr = new FileReader();
+    fr.onload = async function() {
+        mapdata = this.result.slice(this.result.indexOf("[TimingPoints]"), this.result.length);
+        console.log(mapdata.indexOf("]"));
+        mapdata = mapdata.slice(mapdata.indexOf("]")+1, mapdata.length);
+        mapdata = mapdata.slice(0, mapdata.indexOf("[")!=-1?mapdata.indexOf("["):mapdata.length).trim();
+        while(mapdata.indexOf("\r")!=-1) mapdata = mapdata.replace("\r", "");
+        var mapar = mapdata.split("\n");
+        mapar.forEach(e => {
+            e = e.split(",");
+            console.log(e[7]);
+            master.push({offset: e[0], mpb: e[1], meter: e[2], sampleset: e[3], sampleindex: e[4], volume: e[5], inherited: e[6], kiai: e[7]!="0"});
+        });
+        console.log(master);
+        updateSections();
+        loadSection(0);
+    }
+    await fr.readAsText(this.files[0]);
+}
+
 
 //checking shift-key
 $(document).keydown(event => {
